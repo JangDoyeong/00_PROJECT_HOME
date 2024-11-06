@@ -298,10 +298,12 @@
                     if (urlMatch) {
                         const [no, category, time] = [tmp_i, match[1], match[2]];
                         const url_id = urlMatch[1].split("/");
+                        const cate_nick = match[1].split("/");
 
                         parsedLines.push({
                             no,
-                            category,
+                            category: cate_nick[0],
+                            nick: cate_nick[1],
                             id: url_id[3],
                             time,
                             url: urlMatch[1]
@@ -359,7 +361,7 @@
             // 테이블 헤더 생성
             const thead = document.createElement('thead');
             const headerRow = document.createElement('tr');
-            ['No', '카테고리/별칭', '아이디', '대화시간', 'URL'].forEach(headerText => {
+            ['No', '카테고리', '닉네임', '아이디', '대화시간', 'URL'].forEach(headerText => {
                 const th = document.createElement('th');
                 th.textContent = headerText;
 
@@ -381,6 +383,9 @@
                 const categoryCell = document.createElement('td');
                 categoryCell.textContent = item.category;
 
+                const nickCell = document.createElement('td');
+                nickCell.textContent = item.nick;
+
                 const idCell = document.createElement('td');
                 idCell.textContent = item.id;
                 
@@ -396,6 +401,7 @@
 
                 row.appendChild(noCell);
                 row.appendChild(categoryCell);
+                row.appendChild(nickCell);
                 row.appendChild(idCell);
                 row.appendChild(timeCell);
                 row.appendChild(urlCell);
