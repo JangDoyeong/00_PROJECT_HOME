@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>그룹 대화 내용 Parser</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 100%;
+            margin: 20px auto;
+            padding: 0 20px;
+        }
+
+        .upload-container {
+            border: 2px dashed #ccc;
+            padding: 20px;
+            text-align: center;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin-bottom: 20px;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+
+        /* 스피너 스타일 */
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 4px solid rgba(0, 0, 0, 0.1);
+            border-top-color: #333;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        /* 회전 애니메이션 */
+        @keyframes spin {
+        to {
+            transform: rotate(360deg);
+        }
+        }
+
+        .upload-container.dragover {
+            background-color: #e1f5fe;
+            border-color: #2196f3;
+        }
+
+        #result {
+            white-space: pre-wrap;
+            line-height: 1.6;
+            padding: 0;
+            /*
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            background-color: #ffffff;
+            */
+            min-height: 100px;
+        }
+
+        #excel {
+            text-align: right;
+            display: none;
+        }
+
+        .fade-in {
+            animation: fadein 1.5s;
+            -moz-animation: fadein 1.5s; /* Firefox */
+            -webkit-animation: fadein 1.5s; /* Safari and Chrome */
+            -o-animation: fadein 1.5s; /* Opera */
+        }
+
+        @keyframes fadein {
+            from {
+                opacity: 0;
+            }
+            to {
+                opacity: 1;
+            }
+        }
+
+        @-moz-keyframes fadein { /* Firefox */
+            from {
+                opacity: 0;
+            }
+            to {
+                opacity: 1;
+            }
+        }
+
+        @-webkit-keyframes fadein { /* Safari and Chrome */
+            from {
+                opacity: 0;
+            }
+            to {
+                opacity: 1;
+            }
+        }
+
+        @-o-keyframes fadein { /* Opera */
+            from {
+                opacity: 0;
+            }
+            to {
+                opacity: 1;
+            }
+        }
+
+        .result-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+            background-color: white;
+        }
+
+        .result-table th, .result-table td {
+            border: 1px solid #ddd;
+            padding: 12px;
+            text-align: left;
+        }
+
+        .result-table th {
+            background-color: #f5f5f5;
+            font-weight: bold;
+        }
+
+        .result-table tr:nth-child(even) {
+            background-color: #f9f9f9;
+        }
+
+        .result-table tr:hover {
+            background-color: #f0f0f0;
+        }
+
+        .error {
+            color: red;
+            margin: 10px 0;
+        }
+
+        .url-cell {
+            color: #2196f3;
+            text-decoration: underline;
+            cursor: pointer;
+        }
+
+        th {
+            cursor: pointer;
+            background-color: #f4f4f4;
+        }
+
+        th.sorted-asc::after {
+            content: " ▲";
+        }
+
+        th.sorted-desc::after {
+            content: " ▼";
+        }
+
+
+        .excel-btn {
+            background-color: #4CAF50; /* 녹색 배경 */
+            color: white; /* 글자 색상 */
+            padding: 10px 20px;
+            font-size: 16px;
+            font-weight: bold;
+            border: none;
+            border-radius: 5px; /* 모서리 둥글게 */
+            cursor: pointer;
+            transition: background-color 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        .excel-btn:hover {
+            background-color: #45a049; /* 호버 시 더 어두운 녹색 */
+            box-shadow: 0px 4px 8px rgba(0, 0, 0, 0.2); /* 그림자 효과 */
+        }
+
+        .excel-btn:active {
+            background-color: #3e8e41;
+            box-shadow: 0px 2px 4px rgba(0, 0, 0, 0.3); /* 클릭 시 그림자 축소 */
+            transform: translateY(2px); /* 살짝 눌리는 효과 */
+        }
+    </style>
+</head>
+<body>
+    <h1>그룹 대화 내용 Parser</h1>
+    <div class="upload-container" id="dropZone">
+        <p id="loading-div">텍스트 파일을 여기에 드래그하거나 클릭하여 업로드하세요.</p>
+        <input type="file" id="fileInput" accept=".txt" style="display: none;">
+    </div>
+    <div id="error" class="error"></div>
+    <div id="excel"><button class="excel-btn" onclick="exportTableToExcel()">엑셀로 내보내기</button></div>
+    <div id="result"></div>
+
+    <script>
+        const dropZone = document.getElementById('dropZone');
+        const fileInput = document.getElementById('fileInput');
+        const result = document.getElementById('result');
+        const error = document.getElementById('error');
+
+        // 드래그 앤 드롭 이벤트 처리
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('dragover');
+        });
+
+        dropZone.addEventListener('dragleave', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('dragover');
+        });
+
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('dragover');
+            const files = e.dataTransfer.files;
+            handleFile(files[0]);
+        });
+
+        // 클릭하여 파일 선택
+        dropZone.addEventListener('click', () => {
+            fileInput.click();
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            handleFile(file);
+        });
+
+        function handleFile(file) {
+            error.textContent = '';
+            result.textContent = '';
+
+            if (!file) {
+                return;
+            }
+
+            if (file.type !== 'text/plain') {
+                error.textContent = '텍스트 파일만 업로드할 수 있습니다.';
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const text = e.target.result;
+                
+                document.getElementById("loading-div").innerHTML = "";
+                document.getElementById("loading-div").classList.add('spinner');
+
+                setTimeout(function(){ parseText(text); }, 1000);
+            };
+            reader.readAsText(file);
+        }
+
+        function parseText(text) {
+            const lines = text.split('\n');
+            let currentLine = '';
+            let parsedText = '';
+
+            // 정규표현식 패턴 수정
+            const pattern = /\[(.*?)\] \[(.*?)\]/;
+
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i].trim();
+                const match = line.match(pattern);
+
+                if (match) {
+                    // 새로운 형식의 라인을 만났을 때, 이전 라인이 있다면 먼저 추가
+                    if (currentLine) {
+                        parsedText += currentLine + '\n';
+                    }
+                    currentLine = line;
+                } else if (line && currentLine) {
+                    // 형식에 맞지 않는 라인이면서 내용이 있고, 이전 형식 라인이 있는 경우
+                    currentLine += ' ' + line;
+                } else if (line) {
+                    // 형식에 맞지 않는 첫 라인이거나 독립적인 라인
+                    parsedText += line + '\n';
+                }
+            }
+
+            // 마지막 라인 처리
+            if (currentLine) {
+                parsedText += currentLine;
+            }
+
+            const lines2 = parsedText.split('\n');
+            const pattern2 = /\[(.*?)\] \[(.*?)\]/;
+            const parsedLines = [];
+            var parsedLines_txt = "";
+            var newLines = "";
+            var tmp_i = 1;
+            for(i = 0; i < lines2.length; i++){
+                const line2 = lines2[i].trim();
+
+                const match = line2.match(pattern2);
+
+                if (match) {
+                    const urlMatch = line2.match(/(https?:\/\/[^\s]+)/);
+                    if (urlMatch) {
+                        const [no, category, time] = [tmp_i, match[1], match[2]];
+                        const url_id = urlMatch[1].split("/");
+
+                        parsedLines.push({
+                            no,
+                            category,
+                            id: url_id[3],
+                            time,
+                            url: urlMatch[1]
+                        });
+
+                        newLines = tmp_i + " [" + match[1] + "] [" + match[2] + "] " + urlMatch[1] + " ::: " + url_id[3];
+
+                        //console.log(newLines);
+
+                        tmp_i++;
+                    }else{
+
+                    }
+                }
+            }
+
+            if (parsedLines.length > 0) {
+                createTable(parsedLines);
+
+                fileInput.disabled = true;
+
+                // 드래그 앤 드롭 이벤트 처리
+                dropZone.addEventListener('dragover', (e) => {
+                    e.preventDefault();
+                    e.dataTransfer.effectAllowed = 'none';
+                    e.dataTransfer.dropEffect = 'none';
+                });
+
+                dropZone.addEventListener('dragleave', (e) => {
+                    e.preventDefault();
+                    e.dataTransfer.effectAllowed = 'none';
+                    e.dataTransfer.dropEffect = 'none';
+                });
+
+                dropZone.addEventListener('drop', (e) => {
+                    e.preventDefault();
+                    e.dataTransfer.effectAllowed = 'none';
+                    e.dataTransfer.dropEffect = 'none';
+                });
+            } else {
+                result.textContent = '파싱할 수 있는 URL이 없습니다.';
+            }
+
+            //result.textContent = parsedLines_txt;
+        }
+
+        function createTable(data) {
+            const table = document.createElement('table');
+            table.className = 'result-table';
+            table.setAttribute("id","sortableTable");
+
+            document.getElementById("loading-div").classList.remove('spinner');
+            document.getElementById("loading-div").innerHTML = "새로운 파일을 업로드하시려면 페이지를 새로고침하세요.";
+
+            // 테이블 헤더 생성
+            const thead = document.createElement('thead');
+            const headerRow = document.createElement('tr');
+            ['No', '카테고리/별칭', '아이디', '대화 시간', 'URL'].forEach(headerText => {
+                const th = document.createElement('th');
+                th.textContent = headerText;
+
+                if(headerText == "아이디") th.setAttribute("id", "id_sort");
+
+                headerRow.appendChild(th);
+            });
+            thead.appendChild(headerRow);
+            table.appendChild(thead);
+
+            // 테이블 본문 생성
+            const tbody = document.createElement('tbody');
+            data.forEach(item => {
+                const row = document.createElement('tr');
+
+                const noCell = document.createElement('td');
+                noCell.textContent = item.no;
+                
+                const categoryCell = document.createElement('td');
+                categoryCell.textContent = item.category;
+
+                const idCell = document.createElement('td');
+                idCell.textContent = item.id;
+                
+                const timeCell = document.createElement('td');
+                timeCell.textContent = item.time;
+                
+                const urlCell = document.createElement('td');
+                urlCell.className = 'url-cell';
+                urlCell.textContent = item.url;
+                urlCell.addEventListener('click', () => {
+                    window.open(item.url, '_blank');
+                });
+
+                row.appendChild(noCell);
+                row.appendChild(categoryCell);
+                row.appendChild(idCell);
+                row.appendChild(timeCell);
+                row.appendChild(urlCell);
+                tbody.appendChild(row);
+            });
+            table.appendChild(tbody);
+
+            result.innerHTML = '';
+            result.appendChild(table);
+
+            result.classList.add("fade-in");
+
+            document.getElementById("excel").style.display = "block";
+
+            document.getElementById("id_sort").addEventListener('click', () => { sortTable(2); });
+        }
+
+        let sortDirection = {}; // 각 열의 정렬 방향을 저장
+
+        function sortTable(columnIndex) {
+            const table = document.getElementById("sortableTable");
+            const tbody = table.querySelector("tbody");
+            const rows = Array.from(tbody.rows);
+            
+            // 이전 정렬 방향을 확인하여 반대로 설정
+            const isAscending = sortDirection[columnIndex] === 'asc';
+            sortDirection[columnIndex] = isAscending ? 'desc' : 'asc';
+
+            // 모든 헤더의 정렬 상태를 초기화
+            const headers = table.querySelectorAll("th");
+            headers.forEach(header => header.classList.remove("sorted-asc", "sorted-desc"));
+
+            // 정렬 방향에 따라 헤더 스타일 적용
+            headers[columnIndex].classList.add(isAscending ? "sorted-desc" : "sorted-asc");
+
+            // 정렬 수행
+            rows.sort((rowA, rowB) => {
+                const cellA = rowA.cells[columnIndex].innerText;
+                const cellB = rowB.cells[columnIndex].innerText;
+
+                const compareA = isNaN(cellA) ? cellA : Number(cellA);
+                const compareB = isNaN(cellB) ? cellB : Number(cellB);
+
+                if (compareA < compareB) return isAscending ? -1 : 1;
+                if (compareA > compareB) return isAscending ? 1 : -1;
+                return 0;
+            });
+
+            // 정렬된 행을 다시 tbody에 추가
+            //rows.forEach(row => tbody.appendChild(row));
+
+            // 정렬된 행을 다시 tbody에 추가하고 번호 갱신
+            rows.forEach((row, index) => {
+                row.cells[0].innerText = index + 1; // 번호 열 갱신
+                tbody.appendChild(row);
+            });
+        }
+
+        function exportTableToExcel() {
+            // HTML 테이블 요소 가져오기
+            var table = document.getElementById("sortableTable");
+            var workbook = XLSX.utils.table_to_book(table, { sheet: "Sheet1" });
+            
+            // 엑셀 파일 다운로드
+            XLSX.writeFile(workbook, "information.xlsx");
+        }
+
+    </script>
+</body>
+</html>
