@@ -365,7 +365,8 @@
                 const th = document.createElement('th');
                 th.textContent = headerText;
 
-                if(headerText == "아이디") th.setAttribute("id", "id_sort");
+                if(headerText == "닉네임") th.setAttribute("id", "id_sort1");
+                if(headerText == "아이디") th.setAttribute("id", "id_sort2");
 
                 headerRow.appendChild(th);
             });
@@ -416,7 +417,8 @@
 
             document.getElementById("excel").style.display = "block";
 
-            document.getElementById("id_sort").addEventListener('click', () => { sortTable(2); });
+            document.getElementById("id_sort1").addEventListener('click', () => { sortTable(2); });
+            document.getElementById("id_sort2").addEventListener('click', () => { sortTable(3); });
         }
 
         let sortDirection = {}; // 각 열의 정렬 방향을 저장
