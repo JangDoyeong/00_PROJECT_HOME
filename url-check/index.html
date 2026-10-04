@@ -1,1 +1,237 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#fff7ef">
+<title>카톡 링크 날짜별 열기</title>
+<style>
+:root{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Malgun Gothic",sans-serif;color:#302a26;background:#fff7ef}*{box-sizing:border-box}body{margin:0}.wrap{max-width:900px;margin:auto;padding:32px 18px 60px}h1{font-size:32px;margin:0 0 12px}h2{font-size:19px;margin:0 0 16px}.sub,.help{color:#75675d;line-height:1.65}.card{background:white;border:1px solid #eadfd7;border-radius:20px;padding:22px;margin:20px 0}.controls{display:flex;flex-wrap:wrap;gap:12px;align-items:end}.field{flex:1;min-width:190px}label{display:block;font-weight:700;margin-bottom:8px}input,button{font:inherit}input[type=date]{width:100%;padding:13px;border:1px solid #d8c9bd;border-radius:12px}.btn{padding:14px 20px;border:0;border-radius:12px;background:#e86c28;color:white;font-weight:700;cursor:pointer;min-height:48px}.btn.secondary{background:#f4ede6;color:#40352e}.btn:disabled{opacity:.45;cursor:not-allowed}a{color:#8c431d;overflow-wrap:anywhere}#start{width:100%;font-size:18px;margin-top:18px}#status,#openStatus{line-height:1.7;white-space:pre-line}#status.error,#openStatus.error{color:#ac2727}.stats{display:flex;flex-wrap:wrap;gap:20px;margin:16px 0;font-size:14px}.stats b{font-size:22px;margin-right:5px}.item{border-top:1px solid #eadfd7;padding:15px 0;overflow-wrap:anywhere}.item p{margin:7px 0;color:#75675d;font-size:13px}.item a{line-height:1.6}.empty{color:#75675d;padding:15px 0}.help{font-size:13px}summary{cursor:pointer;font-weight:700}button:focus-visible,a:focus-visible,input:focus-visible{outline:3px solid #874321;outline-offset:3px}@media(max-width:500px){.wrap{padding-top:24px}.card{padding:17px}.controls .btn{flex:1}}
+</style>
+</head>
+<body>
+<main class="wrap">
+<h1>카톡 링크 날짜별 열기</h1>
+<p class="sub">분석일을 선택하면 구글 시트의 카톡원본에서 링크를 찾습니다.</p>
+<section class="card">
+<h2>날짜 검색</h2>
+<div class="controls">
+<div class="field"><label for="date">분석일</label><input type="date" id="date" disabled aria-describedby="status"></div>
+<button class="btn secondary" id="reload">새로고침</button>
+<a id="sheetLink" target="_blank" rel="noopener noreferrer">원본 시트 보기</a>
+</div>
+<p id="status" role="status" aria-live="polite">구글 시트에 연결하는 중입니다.</p>
+<div class="stats"><span><b id="rows">0</b>개 원본 행</span><span><b id="total">0</b>개 발견</span><span><b id="unique">0</b>개 열기</span></div>
+<button class="btn" id="start" disabled>시작하기</button>
+<p class="help">같은 날짜에 반복된 동일 링크는 한 번만 엽니다. 여러 탭을 열려면 이 페이지의 팝업 및 리디렉션을 허용해 주세요. 모바일에서는 브라우저에 따라 일괄 열기가 제한될 수 있습니다.</p>
+<p id="openStatus" role="status" aria-live="polite"></p>
+<button class="btn secondary" id="retry" hidden>차단된 링크 다시 열기</button>
+</section>
+<section class="card">
+<div class="controls"><h2 style="flex:1">선택 날짜의 링크</h2><button class="btn secondary" id="copy" disabled>전체 링크 복사</button></div>
+<div id="results"><p class="empty">날짜를 선택해 주세요.</p></div>
+</section>
+</main>
+<script>
+'use strict';
+const SHEET_ID = '1oUU957fyz5YRRG36AZRt8-9QUij8RKxAAnACxkY_bYw';
+const SHEET_GID = '131083240';
+const $ = id => document.getElementById(id);
+const state = { version: 0, dates: [], links: [], failed: [], readyDate: '', loading: false };
+let requestId = 0;
 
+// Google Visualization supports a script callback, including when opened as a local HTML file.
+function querySheet(query) {
+  return new Promise((resolve, reject) => {
+    const callback = '__kakaoSheet' + (++requestId);
+    const script = document.createElement('script');
+    const url = new URL(`https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq`);
+    url.search = new URLSearchParams({gid:SHEET_GID, headers:'1', tq:query, tqx:`out:json;responseHandler:${callback}`, _:String(Date.now())});
+    let timer;
+    const cleanup = () => { clearTimeout(timer); script.remove(); delete window[callback]; };
+    window[callback] = response => {
+      cleanup();
+      if (response.status !== 'ok' || !response.table) {
+        reject(new Error('시트 데이터를 읽지 못했습니다. 원본 시트의 읽기 권한을 확인해 주세요.'));
+      } else resolve(response.table);
+    };
+    script.onerror = () => { cleanup(); reject(new Error('구글 시트 연결에 실패했습니다. 인터넷 연결과 시트 읽기 권한을 확인해 주세요.')); };
+    timer = setTimeout(() => { cleanup(); reject(new Error('시트 응답 시간이 초과되었습니다. 새로고침으로 다시 시도해 주세요.')); }, 20000);
+    script.src = url.href;
+    document.head.appendChild(script);
+  });
+}
+function normalizeDate(value) {
+  const s = String(value ?? '').trim();
+  const m = s.match(/^(20\d{2})-(\d{1,2})-(\d{1,2})$/);
+  if (!m) return null;
+  const year = Number(m[1]), month = Number(m[2]), day = Number(m[3]);
+  const d = new Date(Date.UTC(year, month - 1, day));
+  if (d.getUTCFullYear() !== year || d.getUTCMonth() !== month - 1 || d.getUTCDate() !== day) return null;
+  return `${m[1]}-${m[2].padStart(2,'0')}-${m[3].padStart(2,'0')}`;
+}
+function recordsFromTable(table) {
+  const fields = ['분석일','분석배치ID','원본순번','원본조각수','카톡원본'];
+  const indices = fields.map(label => table.cols.findIndex(col => col.label === label));
+  if (indices.some(i => i < 0)) throw new Error('시트 열 구성이 변경되었습니다. 분석일과 카톡원본 열을 확인해 주세요.');
+  return table.rows.map(row => {
+    const values = indices.map(i => row.c[i]?.v ?? '');
+    return { date:normalizeDate(values[0]), batch:String(values[1]), part:Number(values[2]), count:Number(values[3]), text:String(values[4]) };
+  });
+}
+function collectText(records, date) {
+  const selected = records.filter(row => row.date === date);
+  const batches = new Map();
+  selected.forEach((row, index) => {
+    const key = row.batch || `row-${index}`;
+    if (!batches.has(key)) batches.set(key, []);
+    batches.get(key).push(row);
+  });
+  const texts = [];
+  for (const rows of batches.values()) {
+    rows.sort((a,b) => a.part - b.part);
+    const expected = rows[0].count;
+    if (!Number.isInteger(expected) || expected < 1 || rows.length !== expected ||
+        rows.some((row,i) => row.count !== expected || row.part !== i + 1)) {
+      throw new Error('선택 날짜의 원본 조각이 누락되거나 중복되었습니다. 시트의 원본순번·원본조각수를 확인해 주세요.');
+    }
+    // Join exactly: a split may occur in the middle of a URL.
+    texts.push(rows.map(row => row.text).join(''));
+  }
+  return { rowCount:selected.length, texts };
+}
+function extractLinks(texts) {
+  const all = [];
+  for (const text of texts) {
+    for (const line of text.split(/\r?\n/)) {
+      for (let url of line.match(/https?:\/\/[^\s"'<>]+/gi) || []) {
+        url = url.replace(/[,.。]+$/g, '');
+        for (const [open, close] of [['(',')'],['[',']'],['{','}']]) {
+          while (url.endsWith(close) && url.split(close).length > url.split(open).length) url = url.slice(0,-1);
+        }
+        try {
+          const parsed = new URL(url);
+          if (!['http:','https:'].includes(parsed.protocol) || !parsed.hostname) continue;
+          all.push({url, domain:parsed.hostname, context:line.trim()});
+        } catch { /* Ignore malformed URL tokens. */ }
+      }
+    }
+  }
+  return { total:all.length, links:[...new Map(all.map(link => [link.url,link])).values()] };
+}
+function status(message, error = false) {
+  $('status').textContent = message;
+  $('status').className = error ? 'error' : '';
+}
+function clearResults() {
+  state.links = []; state.failed = []; state.readyDate = '';
+  $('start').disabled = true; $('start').textContent = '시작하기';
+  $('copy').disabled = true; $('retry').hidden = true;
+  $('openStatus').textContent = '';
+  for (const id of ['rows','total','unique']) $(id).textContent = '0';
+  $('results').replaceChildren();
+}
+function renderLinks() {
+  const fragment = document.createDocumentFragment();
+  state.links.forEach((link,index) => {
+    const item = document.createElement('div'); item.className = 'item';
+    const a = document.createElement('a'); a.href = link.url; a.target = '_blank'; a.rel = 'noopener noreferrer';
+    a.textContent = `${index + 1}. ${link.url}`;
+    const p = document.createElement('p'); p.textContent = link.context.slice(0,220);
+    item.append(a,p); fragment.append(item);
+  });
+  $('results').replaceChildren(fragment);
+}
+async function selectDate() {
+  const version = ++state.version;
+  const date = normalizeDate($('date').value);
+  clearResults();
+  if (!date) { status('분석일을 선택해 주세요.'); return; }
+  if (!state.dates.includes(date)) { status(`${date}에 저장된 카톡원본이 없습니다.`); return; }
+  status(`${date}의 카톡원본에서 링크를 찾는 중입니다.`);
+  try {
+    const table = await querySheet(`select A,B,C,D,E where A = '${date}'`);
+    if (version !== state.version) return;
+    const collected = collectText(recordsFromTable(table), date);
+    const result = extractLinks(collected.texts);
+    state.links = result.links; state.readyDate = date;
+    $('rows').textContent = collected.rowCount;
+    $('total').textContent = result.total;
+    $('unique').textContent = result.links.length;
+    $('start').disabled = !result.links.length;
+    $('copy').disabled = !result.links.length;
+    $('start').textContent = result.links.length ? `시작하기 · ${result.links.length}개 링크 열기` : '시작하기';
+    renderLinks();
+    status(result.links.length ? `${date} · 준비 완료. 시작하기를 누르면 모든 링크를 엽니다.` : `${date}의 카톡원본에 열 수 있는 링크가 없습니다.`);
+  } catch (error) {
+    if (version === state.version) status(error.message, true);
+  }
+}
+async function refresh() {
+  const version = ++state.version;
+  clearResults(); state.dates = [];
+  $('date').disabled = true; $('reload').disabled = true;
+  status('구글 시트의 분석일을 불러오는 중입니다.');
+  try {
+    const table = await querySheet('select A where A is not null');
+    if (version !== state.version) return;
+    if (table.cols[0]?.label !== '분석일') throw new Error('A열의 분석일 제목을 확인해 주세요.');
+    state.dates = [...new Set(table.rows.map(row => normalizeDate(row.c[0]?.v)).filter(Boolean))].sort();
+    if (!state.dates.length) { status('시트에 검색 가능한 분석일이 없습니다.'); return; }
+    $('date').min = state.dates[0]; $('date').max = state.dates.at(-1);
+    $('date').disabled = false;
+    if (!$('date').value) $('date').value = state.dates.at(-1);
+    await selectDate();
+  } catch (error) { if (version === state.version) status(error.message, true); }
+  finally { $('reload').disabled = false; }
+}
+function openLinks(links, openWindow = () => window.open('about:blank','_blank')) {
+  const failed = [];
+  let opened = 0;
+  for (const link of links) {
+    let tab;
+    try {
+      tab = openWindow();
+      if (!tab) { failed.push(link); continue; }
+      // Sever access before navigating to an untrusted chat URL.
+      tab.opener = null;
+      tab.location.replace(link.url);
+      opened++;
+    } catch { failed.push(link); try { tab?.close(); } catch {} }
+  }
+  return { opened, failed };
+}
+function start(retry = false) {
+  if (!state.readyDate || state.readyDate !== $('date').value) return;
+  const links = retry ? state.failed : state.links;
+  if (!links.length) return;
+  // Keep all window.open calls in this click handler; no fetch, await or timer here.
+  const result = openLinks(links);
+  state.failed = result.failed;
+  $('retry').hidden = !result.failed.length;
+  $('openStatus').className = result.failed.length ? 'error' : '';
+  $('openStatus').textContent = result.failed.length
+    ? `${result.opened}개 탭 열기 요청, ${result.failed.length}개 열기 실패. 팝업을 허용한 뒤 ‘차단된 링크 다시 열기’를 누르세요.`
+    : `${result.opened}개 탭 열기를 요청했습니다. 각 사이트의 로딩 완료 여부는 해당 탭에서 확인해 주세요.`;
+}
+$('sheetLink').href = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/edit#gid=${SHEET_GID}`;
+$('date').onchange = selectDate;
+$('reload').onclick = refresh;
+$('start').onclick = () => start();
+$('retry').onclick = () => start(true);
+$('copy').onclick = async () => {
+  const text = state.links.map(link => link.url).join('\n');
+  try {
+    if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(text);
+    else {
+      const input = document.createElement('textarea'); input.value = text; document.body.append(input); input.select();
+      const ok = document.execCommand('copy'); input.remove();
+      if (!ok) throw new Error('copy');
+    }
+    $('openStatus').textContent = '전체 링크를 복사했습니다.';
+  } catch { $('openStatus').textContent = '자동 복사가 제한되었습니다. 아래 목록에서 링크를 복사해 주세요.'; }
+};
+refresh();
+</script>
+</body>
+</html>
