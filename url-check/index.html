@@ -18,14 +18,13 @@
 <div class="controls">
 <div class="field"><label for="date">분석일</label><input type="date" id="date" disabled aria-describedby="status"></div>
 <button class="btn secondary" id="reload">새로고침</button>
-<a id="sheetLink" target="_blank" rel="noopener noreferrer">원본 시트 보기</a>
 </div>
 <p id="status" role="status" aria-live="polite">구글 시트에 연결하는 중입니다.</p>
 <div class="stats"><span><b id="rows">0</b>개 원본 행</span><span><b id="total">0</b>개 발견</span><span><b id="unique">0</b>개 열기</span></div>
 <div class="field"><label for="batchSize">한 번에 열 개수</label><select id="batchSize"><option value="5">5개씩</option><option value="10" selected>10개씩</option><option value="20">20개씩</option><option value="all">전체 (남은 링크 모두)</option></select></div>
 <p id="progress" role="status" aria-live="polite">전체 0개 · 열기 요청 0개 · 남은 0개</p>
 <button class="btn" id="start" disabled>시작하기</button>
-<p class="help">같은 날짜에 반복된 동일 링크는 한 번만 엽니다. 여러 탭을 열려면 이 페이지의 팝업 및 리디렉션을 허용해 주세요. 모바일에서는 브라우저에 따라 일괄 열기가 제한될 수 있습니다.</p>
+<p class="help">같은 날짜에 반복된 동일 링크는 한 번만 엽니다. 여러 탭을 열려면 이 페이지의 팝업 및 리디렉션을 허용해 주세요. 링크 열기는 노트북 또는 PC에서 이용해 주세요. 모바일에서는 링크를 열 수 없습니다.</p>
 <p id="openStatus" role="status" aria-live="polite"></p>
 <div class="controls"><button class="btn secondary" id="retry" hidden>차단된 링크 다시 열기</button><button class="btn secondary" id="restart" disabled>처음부터 다시 열기</button></div>
 </section>
@@ -41,6 +40,17 @@ const SHEET_GID = '131083240';
 const $ = id => document.getElementById(id);
 const state = { version: 0, dates: [], links: [], failed: [], readyDate: '', cursor: 0, opened: 0 };
 let requestId = 0;
+
+function allowLinkOpening() {
+  const userAgent = navigator.userAgent || '';
+  const mobile = navigator.userAgentData?.mobile || /Android|iPhone|iPad|iPod|Mobile|Tablet|Silk|Kindle/i.test(userAgent) ||
+    ((navigator.platform === 'MacIntel' || /Macintosh/i.test(userAgent)) && navigator.maxTouchPoints > 1);
+  if (mobile) {
+    window.alert('모바일에서는 URL을 열 수 없습니다. 노트북 또는 PC 환경에서 이용해 주세요.');
+    return false;
+  }
+  return true;
+}
 
 // Google Visualization supports a script callback, including when opened as a local HTML file.
 function querySheet(query) {
@@ -139,6 +149,7 @@ function renderLinks() {
   state.links.forEach((link,index) => {
     const item = document.createElement('div'); item.className = 'item';
     const a = document.createElement('a'); a.href = link.url; a.target = '_blank'; a.rel = 'noopener noreferrer';
+    a.onclick = event => { if (!allowLinkOpening()) event.preventDefault(); };
     a.textContent = `${index + 1}. ${link.url}`;
     const p = document.createElement('p'); p.textContent = link.context.slice(0,220);
     item.append(a,p); fragment.append(item);
@@ -227,6 +238,7 @@ function updateProgress() {
   }
 }
 function start(retry = false) {
+  if (!allowLinkOpening()) return;
   if (!state.readyDate || state.readyDate !== $('date').value) return;
   if (!retry && state.failed.length) return;
   const links = retry ? state.failed.slice(0,batchSize()) : state.links.slice(state.cursor,state.cursor + batchSize());
@@ -243,11 +255,11 @@ function start(retry = false) {
     : `이번에 ${result.opened}개 탭 열기를 요청했습니다. 각 사이트의 로딩 완료 여부는 해당 탭에서 확인해 주세요.`;
 }
 function restart() {
+  if (!allowLinkOpening()) return;
   if (!state.readyDate || state.readyDate !== $('date').value || !state.cursor) return;
   state.cursor = 0; state.opened = 0; state.failed = [];
   start();
 }
-$('sheetLink').href = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/edit#gid=${SHEET_GID}`;
 $('date').onchange = selectDate;
 $('reload').onclick = refresh;
 $('start').onclick = () => start();
